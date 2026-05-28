@@ -190,7 +190,7 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
     )
     
     with st.expander("🔍 展开查看宽表数据快照"):
-        st.dataframe(df_res.head(15))
+        st.dataframe(df_res)
     
     st.markdown("---")
     st.header("📈 搭售业务多维联动诊断看板")
