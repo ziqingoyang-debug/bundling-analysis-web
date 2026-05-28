@@ -193,15 +193,14 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
     st.markdown("---")
     st.header("📈 搭售业务多维联动诊断看板")
     
-    # 💡 联动第一层：选择搭售件
+    # 联动第一层：选择搭售件
     yspu_list = sorted(df_res['搭售件名称'].dropna().unique().tolist())
     selected_yspu = st.selectbox("🎯 1. 请选择要诊断的搭售件 (YSPU)：", yspu_list)
     
     if selected_yspu:
-        # 初步筛选出该搭售件的数据
         df_yspu = df_res[df_res['搭售件名称'] == selected_yspu].copy()
         
-        # 💡 联动第二层：平行选择销售国和销售月份区间
+        # 联动第二层：平行选择销售国和销售月份区间
         col_fill1, col_fill2 = st.columns(2)
         
         with col_fill1:
@@ -238,16 +237,17 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
             # ----------------------------------------------------
             st.markdown(f"### ① {selected_yspu} · 整体搭售率大盘趋势 ({selected_site})")
             
-            # 按月份聚合整体搭售率，防止多条明细行导致画图重叠
+            # 强校验聚合，防止空值干扰整体趋势
             df_overall_trend = df_filtered.groupby('销售月份')['整体搭售率'].first().reset_index()
+            df_overall_trend = df_overall_trend.sort_values(by='销售月份')
             
             fig_overall = go.Figure()
             fig_overall.add_trace(go.Scatter(
                 x=df_overall_trend['销售月份'], 
                 y=df_overall_trend['整体搭售率'],
-                mode='lines+markers+text',   # 💡 强标签：强制开启文本标签显示
+                mode='lines+markers+text',   
                 name='整体搭售率',
-                text=[f"{v:.2%}" for v in df_overall_trend['整体搭售率']], # 标签内容格式化
+                text=[f"{v:.2%}" for v in df_overall_trend['整体搭售率']], 
                 textposition="top center",
                 line=dict(color='#1f77b4', width=4),
                 marker=dict(size=8)
@@ -262,56 +262,67 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
             st.plotly_chart(fig_overall, use_container_width=True)
             
             # ----------------------------------------------------
-            # 📊 图表二：【明细搭售率】趋势图（主销品分拆 + 悬停显示）
+            # 📊 图表二：【明细搭售率】趋势图（强效安全防御机制）
             # ----------------------------------------------------
             st.markdown("---")
             st.markdown(f"### ② {selected_yspu} · 关联不同主销品之明细搭售率追踪")
             
-            # 提取该过滤池内所有出现过的关联主销品名称
-            available_mains = sorted(df_filtered['被搭售的主销品yspu'].dropna().unique().tolist())
+            # 💡 安全处理：强制将主销品字段转换为干净的非空字符串列表
+            df_filtered['被搭售的主销品yspu'] = df_filtered['被搭售的主销品yspu'].astype(str).str.strip()
+            df_valid_mains = df_filtered[
+                (df_filtered['被搭售的主销品yspu'] != 'nan') & 
+                (df_filtered['被搭售的主销品yspu'] != '-') & 
+                (df_filtered['被搭售的主销品yspu'] != '')
+            ].copy()
             
-            # 💡 联动第三层：明细专属主销品过滤
-            selected_mains = st.multiselect(
-                "🔍 过滤特定「被搭售主销品yspu」（留空默认全量展示对比）：", 
-                options=available_mains,
-                default=[]
-            )
+            available_mains = sorted(df_valid_mains['被搭售的主销品yspu'].unique().tolist())
             
-            # 如果运营没有选，默认展示该搭售件旗下的所有主销品线条
-            display_mains = selected_mains if selected_mains else available_mains
-            
-            fig_detail = go.Figure()
-            
-            for main_item in display_mains:
-                df_item = df_filtered[df_filtered['被搭售的主销品yspu'] == main_item]
-                if len(df_item) > 0:
-                    # 构造完美的 Hover 浮窗文本
-                    hover_texts = []
-                    for _, r in df_item.iterrows():
-                        txt = (
-                            f"<b>主销品:</b> {r['被搭售的主销品yspu']}<br>"
-                            f"<b>主销品单品销量:</b> {int(r['主销品单品销量'])}<br>"
-                            f"<b>带动该配件量:</b> {int(r['主销品带动搭售量'])}"
-                        )
-                        hover_texts.append(txt)
-                        
-                    fig_detail.add_trace(go.Scatter(
-                        x=df_item['销售月份'], 
-                        y=df_item['明细搭售率'],
-                        mode='lines+markers',  # 💡 干净清爽，不堆叠标签，只显示点线
-                        name=main_item,
-                        text=hover_texts,
-                        hoverinfo="text+y"     # 💡 鼠标悬停处体现搭售率数据及关联信息
-                    ))
-            
-            fig_detail.update_layout(
-                xaxis=dict(type='category', title="销售月份"),
-                yaxis=dict(title="明细搭售率", tickformat=".2%"),
-                legend=dict(orient="h", yanchor="bottom", y=-0.3, xanchor="left", x=0),
-                margin=dict(l=40, r=40, t=40, b=40),
-                hovermode="closest"
-            )
-            st.plotly_chart(fig_detail, use_container_width=True)
+            if available_mains:
+                selected_mains = st.multiselect(
+                    "🔍 过滤特定「被搭售主销品yspu」（留空默认全量展示对比）：", 
+                    options=available_mains,
+                    default=[]
+                )
+                
+                display_mains = selected_mains if selected_mains else available_mains
+                
+                fig_detail = go.Figure()
+                
+                for main_item in display_mains:
+                    # 💡 强校验：确保 main_item 转化为标准的 Python 基础类型进行切片
+                    item_str = str(main_item)
+                    df_item = df_valid_mains[df_valid_mains['被搭售的主销品yspu'] == item_str].sort_values(by='销售月份')
+                    
+                    if len(df_item) > 0:
+                        hover_texts = []
+                        for _, r in df_item.iterrows():
+                            txt = (
+                                f"<b>主销品:</b> {r['被搭售的主销品yspu']}<br>"
+                                f"<b>主销品单品销量:</b> {int(r['主销品单品销量'])}<br>"
+                                f"<b>带动该配件量:</b> {int(r['主销品带动搭售量'])}"
+                            )
+                            hover_texts.append(txt)
+                            
+                        # 💡 稳健画线：使用类型安全的标准属性定义，彻底拒绝任何脏变量混入
+                        fig_detail.add_trace(go.Scatter(
+                            x=df_item['销售月份'].tolist(), 
+                            y=df_item['明细搭售率'].tolist(),
+                            mode='lines+markers',  
+                            name=item_str,
+                            text=hover_texts,
+                            hoverinfo="text+y"     
+                        ))
+                
+                fig_detail.update_layout(
+                    xaxis=dict(type='category', title="销售月份"),
+                    yaxis=dict(title="明细搭售率", tickformat=".2%"),
+                    legend=dict(orient="h", yanchor="bottom", y=-0.3, xanchor="left", x=0),
+                    margin=dict(l=40, r=40, t=40, b=40),
+                    hovermode="closest"
+                )
+                st.plotly_chart(fig_detail, use_container_width=True)
+            else:
+                st.info("💡 提示：在当前月份和国家筛选条件下，该配件下无合法的主销品带动明细数据。")
             
         else:
             st.warning("⚠️ 当前月份和国家筛选区间内没有匹配的销售流水，请调整上方的筛选器。")
