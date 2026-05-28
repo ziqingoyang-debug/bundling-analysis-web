@@ -121,7 +121,9 @@ if file_b_raw and file_map_raw:
 
                 # 提取真实明细行
                 main_code_col = 'get被搭售的主销品yspu_code' if 'get被搭售的主销品yspu_code' in df_b.columns else 'get被搭售的主销品yspu_code'
-                if 'get被搭售的主销品yspu_code' not in df_b.columns and '被搭售的主销品yspu_code' in df_b.columns:
+                if 'get被搭售的主销品yspu_code' not in df_b.columns and 'box_main_code' in df_b.columns:
+                    main_code_col = 'box_main_code'
+                elif 'get被搭售的主销品yspu_code' not in df_b.columns and '被搭售的主销品yspu_code' in df_b.columns:
                     main_code_col = 'box_main_code'
                     df_b.rename(columns={'被搭售的主销品yspu_code': 'box_main_code'}, inplace=True)
                 
@@ -193,14 +195,12 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
     st.markdown("---")
     st.header("📈 搭售业务多维联动诊断看板")
     
-    # 联动第一层：选择搭售件
     yspu_list = sorted(df_res['搭售件名称'].dropna().unique().tolist())
     selected_yspu = st.selectbox("🎯 1. 请选择要诊断的搭售件 (YSPU)：", yspu_list)
     
     if selected_yspu:
         df_yspu = df_res[df_res['搭售件名称'] == selected_yspu].copy()
         
-        # 联动第二层：平行选择销售国和销售月份区间
         col_fill1, col_fill2 = st.columns(2)
         
         with col_fill1:
@@ -222,7 +222,6 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
                 start_month = end_month = all_months[0]
                 st.info(f"当前筛选条件下仅包含单月数据: {start_month}")
         
-        # 执行全局条件过滤（搭售件 + 站点 + 月份区间）
         df_filtered = df_yspu[
             (df_yspu['站点'] == selected_site) & 
             (df_yspu['销售月份'] >= start_month) & 
@@ -233,14 +232,22 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
         
         if len(df_filtered) > 0:
             # ----------------------------------------------------
-            # 📊 图表一：【整体搭售率】趋势图（单线 + 强标签）
+            # 📊 图表一：【整体搭售率】趋势图（直接内联 Layout 配置）
             # ----------------------------------------------------
             st.markdown(f"### ① {selected_yspu} · 整体搭售率大盘趋势 ({selected_site})")
             
             df_overall_trend = df_filtered.groupby('销售月份')['整体搭售率'].first().reset_index()
             df_overall_trend = df_overall_trend.sort_values(by='销售月份')
             
-            fig_overall = go.Figure()
+            # 💡 用绝对安全的原生字典定义完整图形配置，零外置属性更新
+            layout_overall = go.Layout(
+                xaxis=dict(type='category', title="销售月份"),
+                yaxis=dict(title="整体搭售率", tickformat=".2%"),
+                margin=dict(l=40, r=40, t=40, b=40),
+                hovermode="x unified"
+            )
+            
+            fig_overall = go.Figure(layout=layout_overall)
             fig_overall.add_trace(go.Scatter(
                 x=df_overall_trend['销售月份'], 
                 y=df_overall_trend['整体搭售率'],
@@ -252,16 +259,10 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
                 marker=dict(size=8)
             ))
             
-            fig_overall.update_layout(
-                xaxis=dict(type='category', title="销售月份"),
-                yaxis=dict(title="整体搭售率", tickformat=".2%"),
-                margin=dict(l=40, r=40, t=40, b=40),
-                hovermode="x unified"
-            )
             st.plotly_chart(fig_overall, use_container_width=True)
             
             # ----------------------------------------------------
-            # 📊 图表二：【明细搭售率】趋势图（强效安全防御机制）
+            # 📊 图表二：【明细搭售率】趋势图（实例化写死 Layout，彻底根治报错）
             # ----------------------------------------------------
             st.markdown("---")
             st.markdown(f"### ② {selected_yspu} · 关联不同主销品之明细搭售率追踪")
@@ -273,8 +274,6 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
                 (df_filtered['被搭售的主销品yspu'] != '')
             ].copy()
             
-            available_mains = sorted(df_valid_mains['get被搭售的主销品yspu_code' if 'get被搭售的主销品yspu_code' in df_valid_mains.columns else '被搭售的主销品yspu'].dropna().unique().tolist())
-            # 为方便运营识别，这里直接采用明细名称
             available_mains_names = sorted(df_valid_mains['被搭售的主销品yspu'].unique().tolist())
             
             if available_mains_names:
@@ -286,11 +285,20 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
                 
                 display_mains = selected_mains if selected_mains else available_mains_names
                 
-                fig_detail = go.Figure()
+                # 💡【核心防雷点】：不再调用 update_layout！直接在这里全量声明底层 Layout 结构
+                layout_detail = go.Layout(
+                    xaxis=dict(type='category', title="销售月份"),
+                    yaxis=dict(title="明细搭售率", tickformat=".2%"),
+                    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="left", x=0),
+                    margin=dict(l=40, r=40, t=40, b=40),
+                    hovermode="closest"
+                )
+                
+                fig_detail = go.Figure(layout=layout_detail)
                 
                 for main_item in display_mains:
                     item_str = str(main_item)
-                    df_item = df_valid_mains[df_valid_mains['get被搭售的主销品yspu' if 'get被搭售的主销品yspu' in df_valid_mains.columns else '被搭售的主销品yspu'] == item_str].sort_values(by='销售月份')
+                    df_item = df_valid_mains[df_valid_mains['被搭售的主销品yspu'] == item_str].sort_values(by='销售月份')
                     
                     if len(df_item) > 0:
                         hover_texts = []
@@ -311,14 +319,6 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
                             hoverinfo="text+y"     
                         ))
                 
-                # 💡【核心修复点】：将错写的 orient="h" 彻底修正为标准的 orientation="h"
-                fig_detail.update_layout(
-                    xaxis=dict(type='category', title="销售月份"),
-                    yaxis=dict(title="明细搭售率", tickformat=".2%"),
-                    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="left", x=0),
-                    margin=dict(l=40, r=40, t=40, b=40),
-                    hovermode="closest"
-                )
                 st.plotly_chart(fig_detail, use_container_width=True)
             else:
                 st.info("💡 提示：在当前月份和国家筛选条件下，该配件下无合法的主销品带动明细数据。")
