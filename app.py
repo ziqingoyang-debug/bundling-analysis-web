@@ -18,6 +18,22 @@ file_map_raw = st.sidebar.file_uploader("2. 上传 产品-场景套系映射表 
 if "wide_final" not in st.session_state:
     st.session_state.wide_final = None
 
+# 💡 极其强悍的数字/万字文本通用转换清洗函数
+def clean_money_column(val):
+    if pd.isna(val):
+        return 0.0
+    val_str = str(val).strip().replace(',', '')
+    if not val_str or val_str == '-':
+        return 0.0
+    try:
+        if '万' in val_str:
+            # 兼容 26.9万、1.5万、16万 等各种奇葩格式
+            num_part = val_str.replace('万', '').strip()
+            return float(num_part) * 10000.0
+        return float(val_str)
+    except:
+        return 0.0
+
 # ==========================================
 # 2. 核心数据处理引擎
 # ==========================================
@@ -42,6 +58,23 @@ if file_b_raw and file_map_raw:
                 df_map.columns = [str(c).strip() for c in df_map.columns]
                 
                 # ----------------------------------------------------
+                # 💡 核心修复步：在所有分组聚合前，先对原始底表的金额进行万字彻底清洗转换
+                # ----------------------------------------------------
+                for amt_col in ['单独销售金额_cny', '搭售金额_cny']:
+                    if amt_col in df_b.columns:
+                        df_b[amt_col] = df_b[amt_col].apply(clean_money_column)
+                    else:
+                        df_b[amt_col] = 0.0
+                
+                # 确保销量列也是干净的数值
+                if '销量' in df_b.columns:
+                    df_b['销量'] = pd.to_numeric(df_b['销量'], errors='coerce').fillna(0)
+                if '单独销量' in df_b.columns:
+                    df_b['单独销量'] = pd.to_numeric(df_b['单独销量'], errors='coerce').fillna(0)
+                if '搭售销量' in df_b.columns:
+                    df_b['搭售销量'] = pd.to_numeric(df_b['搭售销量'], errors='coerce').fillna(0)
+
+                # ----------------------------------------------------
                 # 💡 第一步：从底表中提取【大盘主销品单品销量】
                 # ----------------------------------------------------
                 df_main_pool = df_b[df_b['产品类型'] == '主销品'].copy()
@@ -58,17 +91,6 @@ if file_b_raw and file_map_raw:
                 if len(df_acc_pool) == 0:
                     df_acc_pool = df_b[df_b['产品类型'].str.contains('搭|配', na=False)].copy()
                 
-                # 清洗金额列中的 '万' 字并转换为数值
-                for amt_col in ['单独销售金额_cny', '搭售金额_cny']:
-                    if amt_col in df_acc_pool.columns:
-                        if df_acc_pool[amt_col].dtype == object:
-                            df_acc_pool[amt_col] = df_acc_pool[amt_col].astype(str).str.replace('万', '').astype(float) * 10000
-                        else:
-                            df_acc_pool[amt_col] = df_acc_pool[amt_col].astype(float)
-                    else:
-                        df_acc_pool[amt_col] = 0.0
-                
-                # 聚合出大盘数据
                 df_acc_market = df_acc_pool.groupby(['销售月份(month)', '销售国', 'yspu_code']).agg({
                     '销量': 'sum',
                     '单独销量': 'sum',
@@ -84,18 +106,15 @@ if file_b_raw and file_map_raw:
                 })
 
                 # ----------------------------------------------------
-                # 💡 第三步：安全解析映射表 (彻底修复 AttributeError)
+                # 💡 第三步：安全解析映射表 
                 # ----------------------------------------------------
                 map_dict = {}
                 main_col_in_map = '能被搭售的主销品YSPU' if '能被搭售的主销品YSPU' in df_map.columns else '能被搭售品YSPU'
                 
                 for _, row in df_map.iterrows():
                     acc_code = str(row['搭售件YSPU']).strip()
-                    # 强转为最基础的字符串，防止长文本对象错乱
                     main_codes_str = str(row[main_col_in_map])
-                    # 替换可能带来Bug的双引号、括号或换行符
                     main_codes_str = main_codes_str.replace('"', '').replace('\n', '').replace('\r', '')
-                    # 切割成干净的编码列表
                     main_codes_list = [c.strip() for c in main_codes_str.split(',') if c.strip()]
                     map_dict[acc_code] = main_codes_list
                 
@@ -107,7 +126,6 @@ if file_b_raw and file_map_raw:
                     
                     app_main_codes = map_dict.get(m_acc, [])
                     
-                    # 💡 安全防护：过滤主销品销量，防止 DataFrame 属性错乱
                     if isinstance(df_main_sum, pd.DataFrame) and len(df_main_sum) > 0:
                         sub_main = df_main_sum[
                             (df_main_sum['销售月份(month)'] == m_month) & 
@@ -132,7 +150,6 @@ if file_b_raw and file_map_raw:
                     (df_b[main_code_col].notna())
                 ].copy()
                 
-                # 重新命名防冲突
                 df_b_detail.rename(columns={'搭售销量': '主销品带动搭售量'}, inplace=True)
                 
                 # 1. 挂载主销品单品销量
