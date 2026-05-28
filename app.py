@@ -56,30 +56,23 @@ if file_b_raw and file_map_raw:
                 df_b.columns = [str(c).strip() for c in df_b.columns]
                 df_map.columns = [str(c).strip() for c in df_map.columns]
                 
-                # ----------------------------------------------------
-                # 💡 核心修复步：模糊匹配映射表的关键列，彻底防止不可见字符导致的 KeyError
-                # ----------------------------------------------------
+                # 模糊匹配映射表的关键列，彻底防止不可见字符导致的 KeyError
                 acc_col_in_map = None
                 main_col_in_map = None
                 
                 for c in df_map.columns:
                     c_upper = c.upper()
-                    # 只要包含"搭售件"和"YSPU"，就认定是搭售件编码列
                     if '搭售件' in c and 'YSPU' in c_upper:
                         acc_col_in_map = c
-                    # 只要包含"能被搭售"和"YSPU"，就认定是适用主销品列
                     if '能被搭售' in c and 'YSPU' in c_upper:
                         main_col_in_map = c
                 
-                # 容错兜底：如果模糊匹配都没找到，使用硬编码原名
                 if not acc_col_in_map:
                     acc_col_in_map = '搭售件YSPU'
                 if not main_col_in_map:
                     main_col_in_map = '能被搭售的主销品YSPU' if '能被搭售的主销品YSPU' in df_map.columns else '能被搭售品YSPU'
 
-                # ----------------------------------------------------
                 # 金额与销量基础清洗
-                # ----------------------------------------------------
                 for amt_col in ['单独销售金额_cny', '搭售金额_cny']:
                     if amt_col in df_b.columns:
                         df_b[amt_col] = df_b[amt_col].apply(clean_money_column)
@@ -93,9 +86,7 @@ if file_b_raw and file_map_raw:
                 if '搭售销量' in df_b.columns:
                     df_b['搭售销量'] = pd.to_numeric(df_b['搭售销量'], errors='coerce').fillna(0)
 
-                # ----------------------------------------------------
-                # 💡 第一步：从底表中提取【大盘主销品单品销量】
-                # ----------------------------------------------------
+                # 提取【大盘主销品单品销量】
                 df_main_pool = df_b[df_b['产品类型'] == '主销品'].copy()
                 if len(df_main_pool) == 0:
                     df_main_pool = df_b[df_b['产品类型'].str.contains('主', na=False)].copy()
@@ -103,9 +94,7 @@ if file_b_raw and file_map_raw:
                 df_main_sum = df_main_pool.groupby(['销售月份(month)', '销售国', 'yspu_code'])['销量'].sum().reset_index()
                 df_main_sum.rename(columns={'yspu_code': '匹配用_主销品编码', '销量': '大盘主销品单品销量'}, inplace=True)
                 
-                # ----------------------------------------------------
-                # 💡 第二步：计算【搭售件的大盘指标】
-                # ----------------------------------------------------
+                # 计算【搭售件的大盘指标】
                 df_acc_pool = df_b[df_b['产品类型'] == '搭售件'].copy()
                 if len(df_acc_pool) == 0:
                     df_acc_pool = df_b[df_b['产品类型'].str.contains('搭|配', na=False)].copy()
@@ -124,9 +113,7 @@ if file_b_raw and file_map_raw:
                     '搭售金额_cny': '搭售销售金额'
                 })
 
-                # ----------------------------------------------------
-                # 💡 第三步：安全解析映射表 (使用清洗过滤后的动态列名)
-                # ----------------------------------------------------
+                # 安全解析映射表
                 map_dict = {}
                 for _, row in df_map.iterrows():
                     acc_code = str(row[acc_col_in_map]).strip()
@@ -156,12 +143,11 @@ if file_b_raw and file_map_raw:
                 
                 df_acc_market['适用主销品总销量'] = applicable_sales_list
 
-                # ----------------------------------------------------
-                # 💡 第四步：拆解出【真实的明细行】
-                # ----------------------------------------------------
+                # 拆解出【真实的明细行】
                 main_code_col = 'get被搭售的主销品yspu_code' if 'get被搭售的主销品yspu_code' in df_b.columns else 'get被搭售的主销品yspu_code'
                 if 'get被搭售的主销品yspu_code' not in df_b.columns and '被搭售的主销品yspu_code' in df_b.columns:
-                    main_code_col = '被搭售的主销品yspu_code'
+                    main_code_col = 'box_main_code'
+                    df_b.rename(columns={'被搭售的主销品yspu_code': 'box_main_code'}, inplace=True)
                 
                 df_b_detail = df_b[
                     (df_b['产品类型'] == '搭售件') & 
@@ -187,9 +173,7 @@ if file_b_raw and file_map_raw:
                     how='left'
                 )
                 
-                # ----------------------------------------------------
-                # 💡 第五步：指标计算与最终宽表重构
-                # ----------------------------------------------------
+                # 指标计算与最终宽表重构
                 wide['占比'] = wide['搭售件搭售销量'] / wide['搭售件总销量']
                 wide['整体搭售率'] = wide['搭售件搭售销量'] / wide['适用主销品总销量']
                 wide['明细搭售率'] = wide['主销品带动搭售量'] / wide['大盘主销品单品销量']
@@ -225,7 +209,7 @@ if file_b_raw and file_map_raw:
                 st.error(f"❌ 数据清洗冲突，请核对字段格式。报错信息: {e}")
 
 # ==========================================
-# 3. 结果下载与动态线图可视化 Presentation
+# 3. 结果下载与动态线图可视化
 # ==========================================
 if "wide_final" in st.session_state and st.session_state.wide_final is not None:
     df_res = st.session_state.wide_final
@@ -253,6 +237,8 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
     
     if selected_yspu:
         df_chart = df_res[df_res['搭售件名称'] == selected_yspu].copy()
+        
+        # 💡 优化点：确保排序键为标准的字符串类型，防止画图轴错位
         df_chart['排序键'] = df_chart['销售月份'].astype(str) + "_" + df_chart['站点'].astype(str)
         df_chart = df_chart.sort_values(by='排序键')
         
@@ -268,24 +254,27 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
             
         fig = go.Figure()
         
+        # 1. 整体搭售率
         fig.add_trace(go.Scatter(
             x=df_chart['排序键'], y=df_chart['整体搭售率'],
             mode='lines+markers', name='整体搭售率',
             line=dict(color='#1f77b4', width=3), text=hover_texts, hoverinfo='text+y'
         ))
         
+        # 2. 明细搭售率
         fig.add_trace(go.Scatter(
             x=df_chart['排序键'], y=df_chart['明细搭售率'],
             mode='lines+markers', name='明细搭售率',
             line=dict(color='#ff7f0e', width=2, dash='dash'), text=hover_texts, hoverinfo='text+y'
         ))
         
+        # 💡【核心修复点】：移除老版本过期的 template="streamlit"，改用标准白底主题
         fig.update_layout(
-            title=dict(text=f"📊 {selected_yspu} 的搭售率健康度走势分析（整体 vs 明细）", font=dict(size=18)),
+            title=dict(text=f"📊 {selected_yspu} 的搭售率走走势分析（整体 vs 明细）", font=dict(size=18)),
             xaxis_title="时间轴与站点 (月份_国家)", yaxis_title="比率",
             yaxis=dict(tickformat=".2%"), hovermode="closest",
             legend=dict(orient="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            template="streamlit"
+            template="plotly_white"
         )
         st.plotly_chart(fig, use_container_width=True)
 else:
