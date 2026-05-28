@@ -237,7 +237,6 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
             # ----------------------------------------------------
             st.markdown(f"### ① {selected_yspu} · 整体搭售率大盘趋势 ({selected_site})")
             
-            # 强校验聚合，防止空值干扰整体趋势
             df_overall_trend = df_filtered.groupby('销售月份')['整体搭售率'].first().reset_index()
             df_overall_trend = df_overall_trend.sort_values(by='销售月份')
             
@@ -267,7 +266,6 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
             st.markdown("---")
             st.markdown(f"### ② {selected_yspu} · 关联不同主销品之明细搭售率追踪")
             
-            # 💡 安全处理：强制将主销品字段转换为干净的非空字符串列表
             df_filtered['被搭售的主销品yspu'] = df_filtered['被搭售的主销品yspu'].astype(str).str.strip()
             df_valid_mains = df_filtered[
                 (df_filtered['被搭售的主销品yspu'] != 'nan') & 
@@ -275,23 +273,24 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
                 (df_filtered['被搭售的主销品yspu'] != '')
             ].copy()
             
-            available_mains = sorted(df_valid_mains['被搭售的主销品yspu'].unique().tolist())
+            available_mains = sorted(df_valid_mains['get被搭售的主销品yspu_code' if 'get被搭售的主销品yspu_code' in df_valid_mains.columns else '被搭售的主销品yspu'].dropna().unique().tolist())
+            # 为方便运营识别，这里直接采用明细名称
+            available_mains_names = sorted(df_valid_mains['被搭售的主销品yspu'].unique().tolist())
             
-            if available_mains:
+            if available_mains_names:
                 selected_mains = st.multiselect(
                     "🔍 过滤特定「被搭售主销品yspu」（留空默认全量展示对比）：", 
-                    options=available_mains,
+                    options=available_mains_names,
                     default=[]
                 )
                 
-                display_mains = selected_mains if selected_mains else available_mains
+                display_mains = selected_mains if selected_mains else available_mains_names
                 
                 fig_detail = go.Figure()
                 
                 for main_item in display_mains:
-                    # 💡 强校验：确保 main_item 转化为标准的 Python 基础类型进行切片
                     item_str = str(main_item)
-                    df_item = df_valid_mains[df_valid_mains['被搭售的主销品yspu'] == item_str].sort_values(by='销售月份')
+                    df_item = df_valid_mains[df_valid_mains['get被搭售的主销品yspu' if 'get被搭售的主销品yspu' in df_valid_mains.columns else '被搭售的主销品yspu'] == item_str].sort_values(by='销售月份')
                     
                     if len(df_item) > 0:
                         hover_texts = []
@@ -303,7 +302,6 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
                             )
                             hover_texts.append(txt)
                             
-                        # 💡 稳健画线：使用类型安全的标准属性定义，彻底拒绝任何脏变量混入
                         fig_detail.add_trace(go.Scatter(
                             x=df_item['销售月份'].tolist(), 
                             y=df_item['明细搭售率'].tolist(),
@@ -313,10 +311,11 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
                             hoverinfo="text+y"     
                         ))
                 
+                # 💡【核心修复点】：将错写的 orient="h" 彻底修正为标准的 orientation="h"
                 fig_detail.update_layout(
                     xaxis=dict(type='category', title="销售月份"),
                     yaxis=dict(title="明细搭售率", tickformat=".2%"),
-                    legend=dict(orient="h", yanchor="bottom", y=-0.3, xanchor="left", x=0),
+                    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="left", x=0),
                     margin=dict(l=40, r=40, t=40, b=40),
                     hovermode="closest"
                 )
