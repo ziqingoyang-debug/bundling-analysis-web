@@ -18,7 +18,7 @@ file_map_raw = st.sidebar.file_uploader("2. 上传 产品-场景套系映射表 
 if "wide_final" not in st.session_state:
     st.session_state.wide_final = None
 
-# 💡 极其强悍的数字/万字文本通用转换清洗函数
+# 💡 数字/万字文本通用转换清洗函数
 def clean_money_column(val):
     if pd.isna(val):
         return 0.0
@@ -27,7 +27,6 @@ def clean_money_column(val):
         return 0.0
     try:
         if '万' in val_str:
-            # 兼容 26.9万、1.5万、16万 等各种奇葩格式
             num_part = val_str.replace('万', '').strip()
             return float(num_part) * 10000.0
         return float(val_str)
@@ -58,7 +57,28 @@ if file_b_raw and file_map_raw:
                 df_map.columns = [str(c).strip() for c in df_map.columns]
                 
                 # ----------------------------------------------------
-                # 💡 核心修复步：在所有分组聚合前，先对原始底表的金额进行万字彻底清洗转换
+                # 💡 核心修复步：模糊匹配映射表的关键列，彻底防止不可见字符导致的 KeyError
+                # ----------------------------------------------------
+                acc_col_in_map = None
+                main_col_in_map = None
+                
+                for c in df_map.columns:
+                    c_upper = c.upper()
+                    # 只要包含"搭售件"和"YSPU"，就认定是搭售件编码列
+                    if '搭售件' in c and 'YSPU' in c_upper:
+                        acc_col_in_map = c
+                    # 只要包含"能被搭售"和"YSPU"，就认定是适用主销品列
+                    if '能被搭售' in c and 'YSPU' in c_upper:
+                        main_col_in_map = c
+                
+                # 容错兜底：如果模糊匹配都没找到，使用硬编码原名
+                if not acc_col_in_map:
+                    acc_col_in_map = '搭售件YSPU'
+                if not main_col_in_map:
+                    main_col_in_map = '能被搭售的主销品YSPU' if '能被搭售的主销品YSPU' in df_map.columns else '能被搭售品YSPU'
+
+                # ----------------------------------------------------
+                # 金额与销量基础清洗
                 # ----------------------------------------------------
                 for amt_col in ['单独销售金额_cny', '搭售金额_cny']:
                     if amt_col in df_b.columns:
@@ -66,7 +86,6 @@ if file_b_raw and file_map_raw:
                     else:
                         df_b[amt_col] = 0.0
                 
-                # 确保销量列也是干净的数值
                 if '销量' in df_b.columns:
                     df_b['销量'] = pd.to_numeric(df_b['销量'], errors='coerce').fillna(0)
                 if '单独销量' in df_b.columns:
@@ -106,13 +125,11 @@ if file_b_raw and file_map_raw:
                 })
 
                 # ----------------------------------------------------
-                # 💡 第三步：安全解析映射表 
+                # 💡 第三步：安全解析映射表 (使用清洗过滤后的动态列名)
                 # ----------------------------------------------------
                 map_dict = {}
-                main_col_in_map = '能被搭售的主销品YSPU' if '能被搭售的主销品YSPU' in df_map.columns else '能被搭售品YSPU'
-                
                 for _, row in df_map.iterrows():
-                    acc_code = str(row['搭售件YSPU']).strip()
+                    acc_code = str(row[acc_col_in_map]).strip()
                     main_codes_str = str(row[main_col_in_map])
                     main_codes_str = main_codes_str.replace('"', '').replace('\n', '').replace('\r', '')
                     main_codes_list = [c.strip() for c in main_codes_str.split(',') if c.strip()]
@@ -142,7 +159,9 @@ if file_b_raw and file_map_raw:
                 # ----------------------------------------------------
                 # 💡 第四步：拆解出【真实的明细行】
                 # ----------------------------------------------------
-                main_code_col = 'get被搭售的主销品yspu_code' if 'get被搭售的主销品yspu_code' in df_b.columns else '被搭售的主销品yspu_code'
+                main_code_col = 'get被搭售的主销品yspu_code' if 'get被搭售的主销品yspu_code' in df_b.columns else 'get被搭售的主销品yspu_code'
+                if 'get被搭售的主销品yspu_code' not in df_b.columns and '被搭售的主销品yspu_code' in df_b.columns:
+                    main_code_col = '被搭售的主销品yspu_code'
                 
                 df_b_detail = df_b[
                     (df_b['产品类型'] == '搭售件') & 
