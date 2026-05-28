@@ -56,7 +56,7 @@ if file_b_raw and file_map_raw:
                 df_b.columns = [str(c).strip() for c in df_b.columns]
                 df_map.columns = [str(c).strip() for c in df_map.columns]
                 
-                # 模糊匹配映射表的关键列，彻底防止不可见字符导致的 KeyError
+                # 模糊匹配映射表的关键列
                 acc_col_in_map = None
                 main_col_in_map = None
                 
@@ -238,44 +238,46 @@ if "wide_final" in st.session_state and st.session_state.wide_final is not None:
     if selected_yspu:
         df_chart = df_res[df_res['搭售件名称'] == selected_yspu].copy()
         
-        # 💡 优化点：确保排序键为标准的字符串类型，防止画图轴错位
-        df_chart['排序键'] = df_chart['销售月份'].astype(str) + "_" + df_chart['站点'].astype(str)
-        df_chart = df_chart.sort_values(by='排序键')
-        
-        hover_texts = []
-        for idx, row in df_chart.iterrows():
-            text = (
-                f"<b>月份-站点:</b> {row['销售月份']}-{row['站点']}<br>"
-                f"<b>关联主销品:</b> {row['被搭售的主销品yspu']}<br>"
-                f"<b>主销品单品销量:</b> {int(row['主销品单品销量'])}<br>"
-                f"<b>主销品带动搭售量:</b> {int(row['主销品带动搭售量'])}"
-            )
-            hover_texts.append(text)
+        if len(df_chart) > 0:
+            df_chart['排序键'] = df_chart['销售月份'].astype(str) + "_" + df_chart['站点'].astype(str)
+            df_chart = df_chart.sort_values(by='排序键')
             
-        fig = go.Figure()
-        
-        # 1. 整体搭售率
-        fig.add_trace(go.Scatter(
-            x=df_chart['排序键'], y=df_chart['整体搭售率'],
-            mode='lines+markers', name='整体搭售率',
-            line=dict(color='#1f77b4', width=3), text=hover_texts, hoverinfo='text+y'
-        ))
-        
-        # 2. 明细搭售率
-        fig.add_trace(go.Scatter(
-            x=df_chart['排序键'], y=df_chart['明细搭售率'],
-            mode='lines+markers', name='明细搭售率',
-            line=dict(color='#ff7f0e', width=2, dash='dash'), text=hover_texts, hoverinfo='text+y'
-        ))
-        
-        # 💡【核心修复点】：移除老版本过期的 template="streamlit"，改用标准白底主题
-        fig.update_layout(
-            title=dict(text=f"📊 {selected_yspu} 的搭售率走走势分析（整体 vs 明细）", font=dict(size=18)),
-            xaxis_title="时间轴与站点 (月份_国家)", yaxis_title="比率",
-            yaxis=dict(tickformat=".2%"), hovermode="closest",
-            legend=dict(orient="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            template="plotly_white"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            hover_texts = []
+            for idx, row in df_chart.iterrows():
+                text = (
+                    f"月份-站点: {row['销售月份']}-{row['站点']}<br>"
+                    f"关联主销品: {row['被搭售的主销品yspu']}<br>"
+                    f"主销品单品销量: {int(row['主销品单品销量'])}<br>"
+                    f"主销品带动搭售量: {int(row['主销品带动搭售量'])}"
+                )
+                hover_texts.append(text)
+                
+            fig = go.Figure()
+            
+            # 1. 整体搭售率
+            fig.add_trace(go.Scatter(
+                x=df_chart['排序键'], y=df_chart['整体搭售率'],
+                mode='lines+markers', name='整体搭售率',
+                line=dict(color='#1f77b4', width=3), text=hover_texts, hoverinfo='text'
+            ))
+            
+            # 2. 明细搭售率
+            fig.add_trace(go.Scatter(
+                x=df_chart['排序键'], y=df_chart['明细搭售率'],
+                mode='lines+markers', name='明细搭售率',
+                line=dict(color='#ff7f0e', width=2, dash='dash'), text=hover_texts, hoverinfo='text'
+            ))
+            
+            # 💡【超级防御点】：采用极简的原生通用字典赋值，避开所有高版本 Plotly 的特定关键字Bug
+            fig.update_layout(
+                title=f"📊 {selected_yspu} 的搭售率健康度走势（整体 vs 明细）",
+                xaxis_title="时间轴与站点 (月份_国家)",
+                yaxis_title="比率",
+                hovermode="closest"
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("⚠️ 该产品暂无趋势数据可供展示")
 else:
     st.info("💡 提示：请在左侧栏上传【1. IT搭售数据底表】和【2. 产品-场景套系映射表】，然后点击按钮启动清洗。")
