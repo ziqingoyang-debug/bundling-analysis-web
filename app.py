@@ -37,7 +37,7 @@ if file_b_raw and file_map_raw:
                 else:
                     df_map = pd.read_excel(file_map_raw)
                 
-                # 清理表头空格
+                # 安全清理表头空格
                 df_b.columns = [str(c).strip() for c in df_b.columns]
                 df_map.columns = [str(c).strip() for c in df_map.columns]
                 
@@ -46,7 +46,6 @@ if file_b_raw and file_map_raw:
                 # ----------------------------------------------------
                 df_main_pool = df_b[df_b['产品类型'] == '主销品'].copy()
                 if len(df_main_pool) == 0:
-                    # 兼容部分底表字段叫“主商品”或“主货品”
                     df_main_pool = df_b[df_b['产品类型'].str.contains('主', na=False)].copy()
                     
                 df_main_sum = df_main_pool.groupby(['销售月份(month)', '销售国', 'yspu_code'])['销量'].sum().reset_index()
@@ -85,14 +84,18 @@ if file_b_raw and file_map_raw:
                 })
 
                 # ----------------------------------------------------
-                # 💡 第三步：解析映射表，计算【适用主销品总销量】(加入极端断档容错)
+                # 💡 第三步：安全解析映射表 (彻底修复 AttributeError)
                 # ----------------------------------------------------
                 map_dict = {}
                 main_col_in_map = '能被搭售的主销品YSPU' if '能被搭售的主销品YSPU' in df_map.columns else '能被搭售品YSPU'
                 
                 for _, row in df_map.iterrows():
                     acc_code = str(row['搭售件YSPU']).strip()
-                    main_codes_str = str(row[main_col_in_map]).strip()
+                    # 强转为最基础的字符串，防止长文本对象错乱
+                    main_codes_str = str(row[main_col_in_map])
+                    # 替换可能带来Bug的双引号、括号或换行符
+                    main_codes_str = main_codes_str.replace('"', '').replace('\n', '').replace('\r', '')
+                    # 切割成干净的编码列表
                     main_codes_list = [c.strip() for c in main_codes_str.split(',') if c.strip()]
                     map_dict[acc_code] = main_codes_list
                 
@@ -103,17 +106,23 @@ if file_b_raw and file_map_raw:
                     m_acc = row['yspu_code']
                     
                     app_main_codes = map_dict.get(m_acc, [])
-                    sub_main = df_main_sum[
-                        (df_main_sum['销售月份(month)'] == m_month) & 
-                        (df_main_sum['销售国'] == m_site) & 
-                        (df_main_sum['匹配用_主销品编码'].isin(app_main_codes))
-                    ]
-                    applicable_sales_list.append(sub_main['大盘主销品单品销量'].sum() if len(sub_main) > 0 else 0)
+                    
+                    # 💡 安全防护：过滤主销品销量，防止 DataFrame 属性错乱
+                    if isinstance(df_main_sum, pd.DataFrame) and len(df_main_sum) > 0:
+                        sub_main = df_main_sum[
+                            (df_main_sum['销售月份(month)'] == m_month) & 
+                            (df_main_sum['销售国'] == m_site) & 
+                            (df_main_sum['匹配用_主销品编码'].isin(app_main_codes))
+                        ]
+                        val_sum = sub_main['大盘主销品单品销量'].sum() if len(sub_main) > 0 else 0
+                    else:
+                        val_sum = 0
+                    applicable_sales_list.append(val_sum)
                 
                 df_acc_market['适用主销品总销量'] = applicable_sales_list
 
                 # ----------------------------------------------------
-                # 💡 第四步：拆解出【真实的明细行】并精准重命名防护
+                # 💡 第四步：拆解出【真实的明细行】
                 # ----------------------------------------------------
                 main_code_col = 'get被搭售的主销品yspu_code' if 'get被搭售的主销品yspu_code' in df_b.columns else '被搭售的主销品yspu_code'
                 
@@ -123,7 +132,7 @@ if file_b_raw and file_map_raw:
                     (df_b[main_code_col].notna())
                 ].copy()
                 
-                # 避免合并冲突
+                # 重新命名防冲突
                 df_b_detail.rename(columns={'搭售销量': '主销品带动搭售量'}, inplace=True)
                 
                 # 1. 挂载主销品单品销量
@@ -149,7 +158,6 @@ if file_b_raw and file_map_raw:
                 wide['整体搭售率'] = wide['搭售件搭售销量'] / wide['适用主销品总销量']
                 wide['明细搭售率'] = wide['主销品带动搭售量'] / wide['大盘主销品单品销量']
                 
-                # 严格清理空值与分母为0错
                 for rate_col in ['占比', '整体搭售率', '明细搭售率']:
                     wide[rate_col] = wide[rate_col].fillna(0).replace([float('inf'), float('-inf')], 0)
                 
@@ -183,7 +191,6 @@ if file_b_raw and file_map_raw:
 # ==========================================
 # 3. 结果下载与动态线图可视化 Presentation
 # ==========================================
-# 💡【关键防御点】：用包含判定做隔离，确保即使上面出错，下方画图区也不会强行读取 df_res 导致次生崩溃
 if "wide_final" in st.session_state and st.session_state.wide_final is not None:
     df_res = st.session_state.wide_final
     
