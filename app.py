@@ -3,9 +3,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import io
 
-st.set_page_config(page_title="搭售分析看板 & 宽表生成器", layout="wide")
+st.set_page_config(page_title="vernal搭售件宽表生成器 & 搭售率看板", layout="wide")
 
-st.title("📊 独立站搭售分析明细看板系统")
+st.title("📊 vernal商品搭售率联动分析看板")
 st.markdown("---")
 
 # ==========================================
